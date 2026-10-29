@@ -1,0 +1,9 @@
+.DS_Store
+.env
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+backend/stockflow
+*.log
