@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { Movement, Product } from "../src/types.ts";
 
 test("real API: products, stock conflict, sale, cancellation, and immutable history", async ({
   page,
@@ -71,17 +72,124 @@ test("real API: products, stock conflict, sale, cancellation, and immutable hist
   await page
     .getByRole("button", { name: `Delete ${sku}`, exact: true })
     .click();
+  await expect(
+    page.getByRole("heading", { name: "Deactivate product?", exact: true }),
+  ).toBeVisible();
   await page
-    .getByRole("button", { name: "Delete product", exact: true })
+    .getByRole("button", { name: "Deactivate product", exact: true })
     .click();
-  await expect(page.getByRole("alert")).toContainText("has history");
-  await page.getByRole("button", { name: "Keep product" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(row).toContainText("Inactive");
+  await expect(row.locator(".stock-count")).toHaveText("8");
+  await page.getByRole("button", { name: `History for ${sku}` }).click();
+  await expect(page.locator(".history-row")).toHaveCount(3);
+  await page.getByRole("button", { name: "Done", exact: true }).click();
   await page.getByRole("button", { name: `Edit ${sku}`, exact: true }).click();
-  await page.getByLabel("Active and available for orders").uncheck();
+  await page
+    .getByLabel("Product name", { exact: true })
+    .fill("Archived browser test coffee");
   await page.getByRole("button", { name: "Save product" }).click();
   await expect(row).toContainText("Inactive");
   await page.getByRole("button", { name: "Inactive", exact: true }).click();
   await expect(row).toBeVisible();
+  await page
+    .getByRole("button", { name: `Delete ${sku}`, exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("already inactive");
+  await expect(
+    page.getByRole("button", { name: "Delete product", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Deactivate product", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+});
+
+test("products without history can be permanently deleted", async ({
+  page,
+  request,
+}) => {
+  const sku = `DELETE-${Date.now()}`;
+  const created = await request.post("/api/products", {
+    data: { sku, name: "Unused product", price: 1000, is_active: true },
+  });
+  expect(created.status()).toBe(201);
+  const product: Product = await created.json();
+  await page.goto("/");
+  await page.getByLabel("Search products", { exact: true }).fill(sku);
+  await page
+    .getByRole("button", { name: `Delete ${sku}`, exact: true })
+    .click();
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/products/${product.id}`) &&
+      response.request().method() === "DELETE",
+  );
+  await page
+    .getByRole("button", { name: "Delete product", exact: true })
+    .click();
+  expect((await deleted).status()).toBe(204);
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "No products found" }),
+  ).toBeVisible();
+});
+
+test("history added after loading offers deactivation after the real 409", async ({
+  page,
+  request,
+}) => {
+  const sku = `HISTORY-${Date.now()}`;
+  const created = await request.post("/api/products", {
+    data: {
+      sku,
+      name: "Concurrent stock delivery",
+      price: 2000,
+      is_active: true,
+    },
+  });
+  expect(created.status()).toBe(201);
+  const product: Product = await created.json();
+  await page.goto("/");
+  await page.getByLabel("Search products", { exact: true }).fill(sku);
+  const row = page.getByRole("row").filter({ hasText: sku });
+  await page
+    .getByRole("button", { name: `Delete ${sku}`, exact: true })
+    .click();
+  // A second client records inventory while this dialog still has the old row.
+  expect(
+    (
+      await request.post(`/api/products/${product.id}/stock`, {
+        data: {
+          type: "in",
+          qty: 5,
+          note: "Delivery while deletion dialog is open",
+        },
+      })
+    ).status(),
+  ).toBe(200);
+  const conflict = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/products/${product.id}`) &&
+      response.request().method() === "DELETE",
+  );
+  await page
+    .getByRole("button", { name: "Delete product", exact: true })
+    .click();
+  expect((await conflict).status()).toBe(409);
+  await expect(
+    page.getByRole("heading", { name: "Deactivate product?", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Deactivate product", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(row).toContainText("Inactive");
+  await expect(row.locator(".stock-count")).toHaveText("5");
+  const movements = await request.get(`/api/products/${product.id}/movements`);
+  expect(movements.status()).toBe(200);
+  const history: { data: Movement[] } = await movements.json();
+  expect(history.data).toHaveLength(1);
 });
 
 test("loading, empty, and connection error states with retry", async ({

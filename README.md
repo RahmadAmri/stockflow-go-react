@@ -73,7 +73,7 @@ After Go code changes, press **Ctrl+C** in the existing backend terminal and run
 
 ## What is implemented
 
-- Product create/edit/delete; active/inactive status; paginated, case-insensitive search by SKU or name; All / Active / Inactive / Low stock filters applied **before** pagination.
+- Product create/edit/delete; active/inactive status; paginated, case-insensitive search by SKU or name; All / Active / Inactive / Low stock filters applied **before** pagination. The deletion dialog offers direct deactivation for products with history; products without history can be permanently deleted. Deactivated products remain under All products and Inactive.
 - Integer IDR prices and positive integer stock adjustments, with stock history and a visible insufficient-stock error containing the available quantity.
 - Multi-item sales orders using server-side price snapshots and totals. Invalid SKUs, inactive products, duplicate SKUs, invalid quantities, and empty orders are rejected before writes.
 - Atomic stock consumption and movement history; concurrent orders cannot oversell. Cancellation restores every item once, records inbound movements, and retains all historical records.

@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { FormEvent } from "react";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { EmptyState, ErrorMessage, Modal } from "./components";
 import { useResource } from "./hooks";
 import { dateTime, isQuantity, validateProduct } from "./logic";
@@ -309,6 +309,9 @@ export function HistoryDialog({ product, onClose }: Omit<Props, "onSaved">) {
 export function DeleteDialog({ product, onClose, onSaved }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [hasHistory, setHasHistory] = useState(
+    product.last_movement_at !== null,
+  );
   async function remove() {
     setBusy(true);
     setError(null);
@@ -316,27 +319,94 @@ export function DeleteDialog({ product, onClose, onSaved }: Props) {
       await api.deleteProduct(product.id);
       onSaved(`${product.sku} deleted.`);
     } catch (e) {
+      // History may have been added after this product was loaded. The API
+      // remains authoritative; offer deactivation without repeating a deletion
+      // that is now known to be prohibited.
+      if (e instanceof ApiError && e.detail.code === "PRODUCT_HAS_HISTORY") {
+        setHasHistory(true);
+      } else {
+        setError(e);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deactivate() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateProduct(product.id, {
+        sku: product.sku,
+        name: product.name,
+        price: product.price,
+        is_active: false,
+      });
+      onSaved(`${product.sku} deactivated. Stock and history were preserved.`);
+    } catch (e) {
       setError(e);
     } finally {
       setBusy(false);
     }
   }
   return (
-    <Modal title="Delete product?" onClose={onClose} busy={busy}>
+    <Modal
+      title={
+        hasHistory
+          ? product.is_active
+            ? "Deactivate product?"
+            : "Product history is protected"
+          : "Delete product?"
+      }
+      onClose={onClose}
+      busy={busy}
+    >
       <div className="form-body">
-        <p>
-          Delete <strong>{product.name}</strong> ({product.sku})? Products with
-          stock or sales history must be deactivated instead.
-        </p>
+        {hasHistory ? (
+          <>
+            <p>
+              <strong>{product.name}</strong> ({product.sku}) has stock or sales
+              history and cannot be permanently deleted.
+            </p>
+            <p>
+              {product.is_active
+                ? "Deactivate it to remove it from active products and prevent new sales orders. Its stock and history will be preserved."
+                : "This product is already inactive and cannot be used in new sales orders. Its stock and history are preserved."}
+            </p>
+            <p className="field-hint">
+              It remains visible under All products and Inactive.
+            </p>
+          </>
+        ) : (
+          <p>
+            Permanently delete <strong>{product.name}</strong> ({product.sku})
+            from the catalog? This action cannot be undone.
+          </p>
+        )}
         <ErrorMessage error={error} />
       </div>
       <footer className="modal-footer">
         <button className="button secondary" onClick={onClose} disabled={busy}>
-          Keep product
+          {hasHistory
+            ? product.is_active
+              ? "Keep active"
+              : "Close"
+            : "Keep product"}
         </button>
-        <button className="button danger" onClick={remove} disabled={busy}>
-          {busy ? "Deleting…" : "Delete product"}
-        </button>
+        {hasHistory ? (
+          product.is_active && (
+            <button
+              className="button primary"
+              onClick={deactivate}
+              disabled={busy}
+            >
+              {busy ? "Deactivating…" : "Deactivate product"}
+            </button>
+          )
+        ) : (
+          <button className="button danger" onClick={remove} disabled={busy}>
+            {busy ? "Deleting…" : "Delete product"}
+          </button>
+        )}
       </footer>
     </Modal>
   );

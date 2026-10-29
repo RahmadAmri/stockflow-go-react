@@ -19,6 +19,8 @@ Database tests include stock overdraw with no writes, successful adjustments, mu
 
 Browser tests cover product creation/editing, successful adjustment, actual API 409 errors, failed-SKU highlighting, order creation and server totals, cancellation and visibly restored stock, retained history, inactive filtering, loading/empty/error/retry states, order browsing, and a mobile viewport. Loading and network-failure tests delay/abort real requests; they do not substitute inventory responses.
 
+Follow-up deletion-dialog verification on 29 October 2026: the production build, 29 Vitest cases, and all **5** browser workflows passed. The browser suite now verifies permanent deletion with HTTP 204 for products without history, direct deactivation with stock/history preserved, an already-inactive product's explanation, and a real HTTP 409 when another client adds a movement after the deletion dialog opens. These checks used a separate temporary PostgreSQL schema and test API/Vite ports, leaving the working inventory untouched.
+
 ## Limits
 
 - Docker is not installed in this execution environment, so image builds, Compose health checks, and the nginx container have **not** been executed here. The full application was verified with local Go, Node, and real PostgreSQL. To verify the container path: `docker compose up --build -d --wait`, then `E2E_BASE_URL=http://localhost:3000 npm run test:e2e` from `frontend/`.
