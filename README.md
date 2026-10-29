@@ -69,6 +69,8 @@ go run ./cmd/api
 
 The database role needs permission to create tables for automatic migrations. The Go service defaults to `127.0.0.1:8080`; `HTTP_ADDR` overrides it. If you change the API address, set `API_PROXY_TARGET` when starting Vite, for example `API_PROXY_TARGET=http://127.0.0.1:8081 npm run dev`.
 
+After Go code changes, press **Ctrl+C** in the existing backend terminal and run `go run ./cmd/api` again; Go does not reload automatically. Run one API instance on port 8080. Vite's `ECONNREFUSED` means the API is not listening; `address already in use` means another instance already owns the port. Browser-aborted requests (for example, obsolete searches or page reloads) are normal cancellations. The API skips their responses and error logs; a server request exceeding its deadline returns `504 REQUEST_TIMEOUT` and logs a warning.
+
 ## What is implemented
 
 - Product create/edit/delete; active/inactive status; paginated, case-insensitive search by SKU or name; All / Active / Inactive / Low stock filters applied **before** pagination.

@@ -55,6 +55,18 @@ func New(db *pgxpool.Pool) http.Handler {
 func (s *Server) wrap(h handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := h(w, r); err != nil {
+			switch r.Context().Err() {
+			case context.Canceled:
+				// The browser disconnected or aborted an obsolete request. Its
+				// response is no longer needed; transaction defers still roll back.
+				slog.Debug("request canceled", "method", r.Method, "path", r.URL.Path)
+				return
+			case context.DeadlineExceeded:
+				// A server-side deadline is a different failure from a client abort.
+				slog.Warn("request timed out", "method", r.Method, "path", r.URL.Path, "error", err)
+				writeError(w, problem(http.StatusGatewayTimeout, "REQUEST_TIMEOUT", "The request timed out. Check the current state before retrying."))
+				return
+			}
 			var ae *apiError
 			if !errors.As(err, &ae) {
 				var pe *pgconn.PgError
