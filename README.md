@@ -36,25 +36,31 @@ All published ports bind to localhost. This is a local demo without authenticati
 
 Prerequisites: Go 1.25+, Node.js 24 (tested), npm, and PostgreSQL 16+. Dependencies are locked in `go.sum` and `package-lock.json`.
 
-Start only the database:
+Use an already running PostgreSQL server, or start the Compose database:
 
 ```sh
 docker compose up -d --wait db
 ```
 
-Then use two terminals, both starting in the repository root:
+From the repository root, start the complete development app:
 
 ```sh
-# Terminal 1 — migrations, seed, and API
-cd backend
-go run ./cmd/api
+npm --prefix frontend ci
+npm run dev
+```
+
+This starts the Go API, waits for database/API readiness, and then starts Vite on **http://127.0.0.1:5173**. Go and migration file changes automatically rebuild and reload the API. **Ctrl+C stops both services.** The runner checks for occupied ports and does not replace an unrelated running process. Stop any old manual API/Vite processes before starting it.
+
+For separate terminals, both starting in the repository root:
+
+```sh
+# Terminal 1 — migrations, seed, and API with automatic Go reloads
+npm run dev:api
 ```
 
 ```sh
 # Terminal 2 — React development server
-cd frontend
-npm ci
-npm run dev
+npm run dev:web
 ```
 
 Open the Vite URL, normally **http://localhost:5173**. `/api` is proxied to `http://127.0.0.1:8080`, so no permissive CORS configuration is needed. Docker's nginx uses the same `/api` path.
@@ -63,13 +69,22 @@ With an existing PostgreSQL server, create a dedicated `stockflow` database and 
 
 ```sh
 export DATABASE_URL='postgres://your_user:your_password@127.0.0.1:5432/stockflow?sslmode=disable'
-cd backend
-go run ./cmd/api
+npm run dev
 ```
 
 The database role needs permission to create tables for automatic migrations. The Go service defaults to `127.0.0.1:8080`; `HTTP_ADDR` overrides it. If you change the API address, set `API_PROXY_TARGET` when starting Vite, for example `API_PROXY_TARGET=http://127.0.0.1:8081 npm run dev`.
 
-After Go code changes, press **Ctrl+C** in the existing backend terminal and run `go run ./cmd/api` again; Go does not reload automatically. Run one API instance on port 8080. Vite's `ECONNREFUSED` means the API is not listening; `address already in use` means another instance already owns the port. Browser-aborted requests (for example, obsolete searches or page reloads) are normal cancellations. The API skips their responses and error logs; a server request exceeding its deadline returns `504 REQUEST_TIMEOUT` and logs a warning.
+Use `npm run dev` or `npm run dev:api` to reload Go changes automatically. If you instead run `go run ./cmd/api` manually from `backend/`, press **Ctrl+C** and rerun it after backend edits: the existing binary does not gain new endpoints when files change. This can otherwise produce `Endpoint not found` while Vite already displays newer UI code. Run one API instance on port 8080. Vite's `ECONNREFUSED` means the API is not listening; `address already in use` means another instance already owns the port. Browser-aborted requests are normal cancellations; actual request deadlines return `504 REQUEST_TIMEOUT`.
+
+Check the endpoints on the **currently running** app from the repository root:
+
+```sh
+npm run check:api
+# For the Docker stack:
+API_BASE_URL=http://localhost:3000 npm run check:api
+```
+
+The check exercises all route families, including status changes, expected validation/conflict responses, and create/edit/delete of a disposable zero-stock product. It removes that product afterward and never adjusts existing inventory or cancels an existing order. Successful stock/sale/cancellation transactions and protected history are verified by the isolated integration/browser suites below.
 
 ## What is implemented
 

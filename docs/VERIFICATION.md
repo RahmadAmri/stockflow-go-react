@@ -19,6 +19,14 @@ The browser suite ran against a fresh, compiled **production frontend**, served 
 | Fresh migrations and repeat startup | Passed; 14 products, 2 orders, no duplicated seed rows, stock and order totals reconcile with history/items |
 | Existing local app health through Vite | HTTP 200 |
 
+## Live endpoint and development-reload verification
+
+The later `Endpoint not found` report was reproduced against port 8080: its process had started before the status route was added. The running API was replaced with the current build. **26 live HTTP checks now pass through the actual Vite proxy on port 5173**, including successful product create/update/status/delete responses and required validation/conflict/missing-record responses. The smoke check creates and removes one disposable zero-stock product; existing products and orders are not altered.
+
+The new root `npm run dev` command was tested with a separate PostgreSQL schema and ports. It starts the API before Vite, selects the native Go toolchain, and automatically rebuilds/restarts Go after source changes. Verification confirmed that saving a Go file changed the API process and restored HTTP health, a duplicate startup was rejected without stopping the existing server, and Ctrl+C released both ports. **All 8 browser workflows and the backend race suite passed again.**
+
+Run `npm run check:api` from the repository root to check the currently running application. Successful inventory adjustments, sales, cancellation, and history protection are exercised in the isolated browser/API suites rather than by changing the working warehouse's records. CI runs the live check against the Compose frontend before the browser suite.
+
 ## Assignment coverage
 
 | Required behavior | Evidence |

@@ -56,6 +56,9 @@ jobs:
         working-directory: frontend
       - run: docker compose config --quiet
       - run: docker compose up --build -d --wait --wait-timeout 180
+      - run: npm run check:api
+        env:
+          API_BASE_URL: http://127.0.0.1:3000
       - run: npm run test:e2e
         working-directory: frontend
         env:
