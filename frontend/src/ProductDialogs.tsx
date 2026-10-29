@@ -335,12 +335,7 @@ export function DeleteDialog({ product, onClose, onSaved }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await api.updateProduct(product.id, {
-        sku: product.sku,
-        name: product.name,
-        price: product.price,
-        is_active: false,
-      });
+      await api.setProductStatus(product.id, false);
       onSaved(`${product.sku} deactivated. Stock and history were preserved.`);
     } catch (e) {
       setError(e);

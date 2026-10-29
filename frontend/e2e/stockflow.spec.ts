@@ -177,6 +177,18 @@ test("history added after loading offers deactivation after the real 409", async
     .getByRole("button", { name: "Delete product", exact: true })
     .click();
   expect((await conflict).status()).toBe(409);
+  expect(
+    (
+      await request.put(`/api/products/${product.id}`, {
+        data: {
+          sku,
+          name: "Newer catalog details",
+          price: 3500,
+          is_active: true,
+        },
+      })
+    ).status(),
+  ).toBe(200);
   await expect(
     page.getByRole("heading", { name: "Deactivate product?", exact: true }),
   ).toBeVisible();
@@ -186,6 +198,8 @@ test("history added after loading offers deactivation after the real 409", async
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(row).toContainText("Inactive");
   await expect(row.locator(".stock-count")).toHaveText("5");
+  await expect(row).toContainText("Newer catalog details");
+  await expect(row).toContainText("Rp 3.500");
   const movements = await request.get(`/api/products/${product.id}/movements`);
   expect(movements.status()).toBe(200);
   const history: { data: Movement[] } = await movements.json();

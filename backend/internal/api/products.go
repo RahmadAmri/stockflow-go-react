@@ -148,6 +148,32 @@ func (s *Server) updateProduct(w http.ResponseWriter, r *http.Request) error {
 	}
 	return writeJSON(w, 200, p)
 }
+
+// Status changes must not overwrite a newer name, SKU, or price from another
+// editor. A single UPDATE serializes with sales and changes only this flag.
+func (s *Server) updateProductStatus(w http.ResponseWriter, r *http.Request) error {
+	id, err := idParam(r)
+	if err != nil {
+		return err
+	}
+	var in struct {
+		IsActive *bool `json:"is_active"`
+	}
+	if err := decode(w, r, &in); err != nil {
+		return err
+	}
+	if in.IsActive == nil {
+		return invalid("is_active is required and must be a boolean")
+	}
+	p, err := scanProduct(s.db.QueryRow(r.Context(),
+		"UPDATE products p SET is_active=$2 WHERE p.id=$1 RETURNING "+productColumns,
+		id, *in.IsActive))
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, 200, p)
+}
+
 func (s *Server) deleteProduct(w http.ResponseWriter, r *http.Request) error {
 	id, err := idParam(r)
 	if err != nil {

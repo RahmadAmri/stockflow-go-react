@@ -105,6 +105,11 @@ export const api = {
     }),
   deleteProduct: (id: number) =>
     request<void>(`/products/${id}`, { method: "DELETE" }),
+  setProductStatus: (id: number, isActive: boolean) =>
+    request<Product>(`/products/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active: isActive }),
+    }),
   adjustStock: (id: number, body: StockInput) =>
     request<Product>(`/products/${id}/stock`, {
       method: "POST",

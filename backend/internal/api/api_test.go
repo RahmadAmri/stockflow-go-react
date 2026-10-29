@@ -380,6 +380,56 @@ func TestOverflowDoesNotWrite(t *testing.T) {
 	requireScalar(t, db, 0, "SELECT count(*) FROM stock_movements")
 	requireScalar(t, db, maxInteger, "SELECT stock FROM products WHERE sku='A'")
 }
+
+func TestStatusChangePreservesLatestProductAndHistory(t *testing.T) {
+	db := testDB(t)
+	id := fixture(t, db, "A", 100, 0)
+	h := New(db)
+	path := fmt.Sprintf("/api/products/%d", id)
+	requireStatus(t, call(h, "POST", path+"/stock", `{"type":"in","qty":5}`), 200)
+	// Another editor changes catalog fields while the deactivation dialog is open.
+	requireStatus(t, call(h, "PUT", path, `{"sku":"A","name":"Updated by another editor","price":250}`), 200)
+	w := call(h, "PATCH", path+"/status", `{"is_active":false}`)
+	requireStatus(t, w, 200)
+	var p Product
+	if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.IsActive || p.Name != "Updated by another editor" || p.Price != 250 || p.Stock != 5 || p.LastMovementAt == nil {
+		t.Fatalf("status change damaged product data: %+v", p)
+	}
+	requireScalar(t, db, 1, "SELECT count(*) FROM stock_movements WHERE product_id=$1", id)
+	requireStatus(t, call(h, "POST", "/api/orders", `{"customer":"Cafe","items":[{"sku":"A","qty":1}]}`), 400)
+	for _, body := range []string{`{}`, `null`, `{"is_active":null}`, `{"is_active":"false"}`, `{"is_active":false,"price":1}`} {
+		requireStatus(t, call(h, "PATCH", path+"/status", body), 400)
+	}
+	requireStatus(t, call(h, "PATCH", "/api/products/999/status", `{"is_active":true}`), 404)
+	requireStatus(t, call(h, "PATCH", path+"/status", `{"is_active":true}`), 200)
+	requireStatus(t, call(h, "POST", "/api/orders", `{"customer":"Cafe","items":[{"sku":"A","qty":1}]}`), 201)
+}
+
+func TestCancellationStockLimitIsAtomic(t *testing.T) {
+	db := testDB(t)
+	fixture(t, db, "A", 100, 5)
+	b := fixture(t, db, "B", 200, 5)
+	h := New(db)
+	w := call(h, "POST", "/api/orders", `{"customer":"Cafe","items":[{"sku":"A","qty":2},{"sku":"B","qty":2}]}`)
+	requireStatus(t, w, 201)
+	var order Order
+	if err := json.Unmarshal(w.Body.Bytes(), &order); err != nil {
+		t.Fatal(err)
+	}
+	requireStatus(t, call(h, "POST", fmt.Sprintf("/api/products/%d/stock", b), `{"type":"in","qty":2147483644}`), 200)
+	w = call(h, "POST", fmt.Sprintf("/api/orders/%d/cancel", order.ID), "")
+	requireStatus(t, w, 409)
+	if !strings.Contains(w.Body.String(), "STOCK_LIMIT") {
+		t.Fatal(w.Body.String())
+	}
+	requireScalar(t, db, 3, "SELECT stock FROM products WHERE sku='A'")
+	requireScalar(t, db, maxInteger, "SELECT stock FROM products WHERE sku='B'")
+	requireScalar(t, db, 3, "SELECT count(*) FROM stock_movements")
+	requireScalar(t, db, 1, "SELECT count(*) FROM sales_orders WHERE status='CREATED' AND cancelled_at IS NULL")
+}
 func TestValidateOrder(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -26,6 +26,7 @@ func New(db *pgxpool.Pool) http.Handler {
 	mux.HandleFunc("GET /api/products", s.wrap(s.listProducts))
 	mux.HandleFunc("POST /api/products", s.wrap(s.createProduct))
 	mux.HandleFunc("PUT /api/products/{id}", s.wrap(s.updateProduct))
+	mux.HandleFunc("PATCH /api/products/{id}/status", s.wrap(s.updateProductStatus))
 	mux.HandleFunc("DELETE /api/products/{id}", s.wrap(s.deleteProduct))
 	mux.HandleFunc("POST /api/products/{id}/stock", s.wrap(s.adjustStock))
 	mux.HandleFunc("GET /api/products/{id}/movements", s.wrap(s.movements))
