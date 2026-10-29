@@ -1,29 +1,55 @@
 # Verification record
 
-Verified on **29 October 2026 (Asia/Jakarta)** using macOS arm64, Go 1.25.5, Node.js 24.11.0, PostgreSQL 16.8 (Postgres.app), and installed Google Chrome.
+Latest verification: **29 October 2026 (Asia/Jakarta)**. Environment: macOS arm64, Go 1.25.5, Node.js 24.11.0, PostgreSQL 16.8 (Postgres.app), and Google Chrome.
 
-A separate temporary PostgreSQL cluster was initialized on localhost port 55432 for this work. The application ran against its actual PostgreSQL database; integration tests created and removed isolated schemas. Existing databases were not modified.
+The browser suite ran against a fresh, compiled **production frontend**, served by Vite preview with `/api` proxied to the real Go API. Its database was an isolated PostgreSQL schema on separate API/preview ports. Backend tests created their own isolated schemas. The working inventory was not used for test mutations, and the user's API and Vite processes were left running.
+
+## Results
 
 | Check | Result |
 | --- | --- |
-| `TEST_DATABASE_URL=… go test -race -count=1 -v ./...` | Passed: 12 top-level test groups, including 5 validation subcases; database tests ran, not skipped |
+| Real PostgreSQL `go test -race -count=1 -v ./...` | **Passed: 17 top-level test groups**, plus 13 validation/error-handling subcases; database tests ran, not skipped |
 | `go vet ./...` | Passed |
-| `npm test` | Passed: 29 Vitest cases |
-| `npm run build` | Passed: strict TypeScript checking (app, config, and browser tests) and Vite production build |
-| `PLAYWRIGHT_CHROME_CHANNEL=chrome … npm run test:e2e` | Passed: all 3 real-backend browser workflows |
-| Live `/api/health`, product listing, and summary | Passed |
-| Desktop (1440 px) and mobile (390 px) browser inspection | Passed; no browser JavaScript errors or document-wide horizontal overflow |
-| Fresh migrations, repeated migrations, seeds | Passed; 14 products, 2 orders, stock reconciles with movements, totals reconcile with items, no duplicate seeds |
+| Fresh `npm ci` in a separate checkout copy | Passed; dependency installation did not depend on the existing node_modules |
+| `npm test` | **Passed: 29 Vitest cases** |
+| `npm run build` | Passed: strict TypeScript checks and Vite production build |
+| Playwright against the production build + real Go/PostgreSQL | **Passed: all 8 browser workflows** |
+| Linux amd64 backend build with `CGO_ENABLED=0` | Passed |
+| Official Docker Compose `config --quiet` | Passed |
+| Fresh migrations and repeat startup | Passed; 14 products, 2 orders, no duplicated seed rows, stock and order totals reconcile with history/items |
+| Existing local app health through Vite | HTTP 200 |
 
-Database tests include stock overdraw with no writes, successful adjustments, multi-item insufficiency, a forced second-item database failure after earlier writes, price snapshots, validation and integer limits, history protection, 24 simultaneous orders for 10 units, concurrent cancellations, and reversed-order multi-product locking. The forced-failure test intentionally logs one database error and verifies full rollback.
+## Assignment coverage
 
-Browser tests cover product creation/editing, successful adjustment, actual API 409 errors, failed-SKU highlighting, order creation and server totals, cancellation and visibly restored stock, retained history, inactive filtering, loading/empty/error/retry states, order browsing, and a mobile viewport. Loading and network-failure tests delay/abort real requests; they do not substitute inventory responses.
+| Required behavior | Evidence |
+| --- | --- |
+| Product CRUD, validation, unique SKU, missing-product 404 | PostgreSQL API tests and real-browser create/edit/delete flows |
+| Permanent deletion returns 204 only without history; history returns 409 | API tests and browser deletion/deactivation tests, including history added after the dialog opens |
+| Nullable `last_movement_at`, newest-first movement history | API behavior and browser history checks after adjustment, sale, and cancellation |
+| Debounced SKU/name search, pagination, All/Active/Inactive/Low-stock filters | Browser checks using more than one page of products, case-insensitive search, filter transitions, and a product crossing the low-stock threshold |
+| Loading, empty, error, and retry states | Browser request-delay and connection-abort scenarios; real responses are forwarded, not mocked |
+| Positive integer stock adjustment and visible 409 availability | Unit/API tests and browser overdraw flow |
+| Empty/duplicate/unknown/invalid order items rejected before writes | PostgreSQL validation tests and frontend pure-logic tests |
+| Server unit prices and totals | Price-snapshot API test and browser multi-item order after a price changes in another session |
+| Multi-item atomicity; nothing written on insufficiency or SQL failure | PostgreSQL tests, including a forced second-item database failure after writes have begun |
+| No overselling under concurrent orders | 24 simultaneous orders for 10 units: exactly 10 succeed; stock remains nonnegative |
+| Consistent lock ordering | Concurrent multi-item orders supplied in opposite SKU order |
+| Cancellation restores all items only once | API cancellation-race tests and browser checks; stock-limit failure leaves the whole cancellation unapplied |
+| Order 400 and SKU-specific 409 displayed in UI | Browser checks against real inactive-product validation and multi-item stock conflicts |
+| Global summary totals refreshed after mutations | Browser assertions after deletion, adjustment, deactivation, sale, and cancellation; search/filter/pagination do not narrow summary totals |
+| Real API client, shared types, strict TypeScript, no domain `any` | Source review, single fetch boundary in `src/api.ts`, strict production build |
+| Seed data, migrations, README, commits, hours | 14 seeded products and 2 sample orders, repeat-migration test, documented commands/design decisions, actual local commits; **5 human hours reported by the user** |
 
-Follow-up deletion-dialog verification on 29 October 2026: the production build, 29 Vitest cases, and all **5** browser workflows passed. The browser suite now verifies permanent deletion with HTTP 204 for products without history, direct deactivation with stock/history preserved, an already-inactive product's explanation, and a real HTTP 409 when another client adds a movement after the deletion dialog opens. These checks used a separate temporary PostgreSQL schema and test API/Vite ports, leaving the working inventory untouched.
+## Fixes made during the review
 
-## Limits
+- Status changes now use `PATCH /api/products/{id}/status`, updating only `is_active`. Deactivating an older table row no longer overwrites another editor's newer name or price.
+- Startup reserves the listening port before announcing readiness. A second API process receives an actionable port error. Shutdown waits for active requests before closing the database pool.
+- The Vitest exclusion pattern is quoted, preventing the shell from expanding multiple Playwright files into unintended Vitest arguments.
+- CI now has a separate Compose job that builds all three services and runs the browser suite against nginx on port 3000, in addition to the PostgreSQL/API/unit/build checks.
 
-- Docker is not installed in this execution environment, so image builds, Compose health checks, and the nginx container have **not** been executed here. The full application was verified with local Go, Node, and real PostgreSQL. To verify the container path: `docker compose up --build -d --wait`, then `E2E_BASE_URL=http://localhost:3000 npm run test:e2e` from `frontend/`.
-- The GitHub Actions workflow was added but has not run on GitHub.
-- These tests validate a local application, not a production load test or a security audit. Authentication, order idempotency, and daily sales reports remain outside the implemented scope.
-- No claim is made that this AI-assisted implementation meets the assignment's prohibition on AI-generated code. See the root README disclosure.
+## Verification limits and submission conditions
+
+- **Container execution is not verified locally.** The Docker Engine is unavailable here. Compose configuration validates, the backend cross-compiles for Linux, and the production frontend works against Go/PostgreSQL, but these checks do not replace executing the Docker images and nginx. The new Compose CI job is configured but has not run on GitHub.
+- To verify containers: `docker compose up --build -d --wait`, then from `frontend/`: `E2E_BASE_URL=http://localhost:3000 npm run test:e2e`. Stop any services already occupying the Compose host ports or change those mappings first.
+- Idempotency keys and daily-sales reporting are **optional bonuses not implemented**. Authentication and production deployment hardening remain outside this local take-home scope.
+- The assignment prohibits AI-generated code. This repository explicitly discloses AI assistance and cannot be presented as meeting that restriction without evaluator permission. The reported 5 hours describe the user's own work, not a claim of AI-free authorship.

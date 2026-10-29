@@ -1,4 +1,4 @@
-import type { OrderInput, ProductInput } from "./types";
+import type { OrderInput, ProductInput } from "./types.ts";
 
 export const MAX_INTEGER = 2_147_483_647;
 export function isQuantity(value: string): boolean {

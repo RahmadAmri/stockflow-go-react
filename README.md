@@ -89,6 +89,7 @@ Every error uses `{"error":{"code":"...","message":"..."}}`. Validation can incl
 | GET | `/api/products?search=&page=1&limit=20&filter=all` | `{data, page, limit, total}`; each product includes nullable `last_movement_at` |
 | POST | `/api/products` | 201, created product with zero stock |
 | PUT | `/api/products/{id}` | 200, updated product; 404 if absent |
+| PATCH | `/api/products/{id}/status` | Additional endpoint: `{is_active: boolean}` updates only status; preserves current catalog fields and stock |
 | DELETE | `/api/products/{id}` | 204; 409 `PRODUCT_HAS_HISTORY` if referenced by history |
 | POST | `/api/products/{id}/stock` | 200, updated product; 409 `INSUFFICIENT_STOCK` on overdraw |
 | GET | `/api/products/{id}/movements` | `{data: [...]}`, newest first; 404 if product absent |
@@ -159,7 +160,7 @@ Example insufficient-order-stock response:
 ## Data safety and design decisions
 
 1. **Transactions and locks.** Order creation locks all requested products with `SELECT … ORDER BY sku FOR UPDATE`, validates all items, then writes the order, its items, stock decrements, and movements in one transaction. Decrements additionally have `WHERE stock >= qty`. Adjustment and cancellation use the same product locks; cancellation first locks the order, so competing cancellation requests restore stock only once. Multi-product operations acquire product locks in the same order to reduce deadlocks. Database constraints are a final backstop. See [PostgreSQL's locking documentation](https://www.postgresql.org/docs/16/explicit-locking.html).
-2. **Historical integrity.** Order item prices are immutable snapshots. Changing a product's name, price, or active status does not change an existing order. SKU changes are blocked once history exists, and products with history can be deactivated rather than deleted. Cancellation can restore inactive products. There are no history-delete endpoints or cascading deletes.
+2. **Historical integrity.** Order item prices are immutable snapshots. Changing a product's name, price, or active status does not change an existing order. SKU changes are blocked once history exists, and products with history can be deactivated rather than deleted. The status-only PATCH endpoint prevents deactivation from overwriting another editor's newer catalog fields. Cancellation can restore inactive products. There are no history-delete endpoints or cascading deletes.
 3. **Stock authority.** New products start at zero. Stock changes only through adjustment, order, and cancellation transactions. Seed opening balances and sample orders have matching movement records. `last_movement_at` is derived with `MAX(created_at)` over the indexed movements table, avoiding a second stored timestamp that could drift.
 4. **Consistent listing.** Counts and rows in each paginated list use a repeatable-read transaction. Summary totals use a single aggregate query over all products, independent of page/search/filter. Low stock means `stock <= 10`, including inactive products. Stock value includes inactive inventory and uses current sale price, not inventory cost accounting.
 5. **Cross-stack errors.** `frontend/src/types.ts` holds domain/API types; `api.ts` owns every fetch call and envelope parsing. Components display validation fields, the failing SKU, and availability. Aborted obsolete searches cannot overwrite newer results. Mutations are not automatically retried.
@@ -202,7 +203,7 @@ DATABASE_URL='postgres://stockflow:stockflow@localhost:5432/stockflow?sslmode=di
 
 Playwright starts/reuses the local API and Vite servers. `E2E_BASE_URL=http://localhost:3000 npm run test:e2e` tests an already running Compose stack instead. `PLAYWRIGHT_CHROME_CHANNEL=chrome` uses an installed Chrome. Tests use real API responses; the connection-error test deliberately aborts requests, and the loading test delays forwarding a real request. No inventory responses are mocked.
 
-Coverage includes failed stock adjustments with no writes, successful movements, multi-item rollback, server price authority, invalid inputs, history protections, integer limits, 24 concurrent orders competing for 10 units, cancellation races, reversed item ordering, and a database-trigger failure after writes have already begun. Frontend tests cover pure validation/formatting and browser journeys through stock conflicts, order creation, cancellation, restored inventory, history, loading/empty/error/retry states, and a mobile viewport. CI runs backend tests, frontend tests/build, and browser tests with PostgreSQL.
+Coverage includes failed stock adjustments with no writes, successful movements, multi-item rollback, server price authority, invalid inputs, history protections, integer limits, 24 concurrent orders competing for 10 units, cancellation races, reversed item ordering, and a database-trigger failure after writes have already begun. Frontend tests cover pure validation/formatting and browser journeys through stock conflicts, order creation, cancellation, restored inventory, history, loading/empty/error/retry states, and a mobile viewport. Additional browser checks verify multi-item orders, stale prices, real 400 responses, pagination/filters, summary refreshes, and deactivation after concurrent catalog edits. CI runs the PostgreSQL/API/unit/build checks plus a separate full-stack Compose browser job.
 
 See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the actual local verification record and environment limits.
 
@@ -211,7 +212,7 @@ See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the actual local verificati
 - The mandatory feature flows and full-stack Compose configuration are implemented. Bonuses included: all three services in Compose, `useDebounce`, skeletons, and concurrency/race tests.
 - Deferred: order idempotency keys, daily sales reports, authentication/authorization, paginated movement history, inventory costing, richer audit identity, and production observability. A lost response after a committed sale requires checking the order list before retrying; idempotency keys are the next data-safety improvement.
 - Production migration execution should use a dedicated deployment role; request credentials should have narrower permissions. Production schema changes would need a rollout strategy and backups.
-- **Human hours spent:** not supplied and cannot be inferred from this AI session. No claim of 6–8 hours of independent work is made. Record actual human effort before any permitted submission.
+- **Human hours spent:** 5 hours, reported by the user. The implementation includes AI assistance as disclosed above; this is not a claim of AI-free independent work.
 - **Git history:** the repository had no commits when work began. Focused local commits group the API, frontend, and deployment/documentation work at the end of this implementation session. No commits are backdated and no day-long activity is claimed.
 
 Repository layout:
